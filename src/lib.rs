@@ -3,6 +3,7 @@ use tower_service::Service;
 use worker::*;
 
 mod models;
+mod utils;
 
 fn router() -> Router {
     Router::new().route("/", get(root))
