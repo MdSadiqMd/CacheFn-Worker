@@ -1,0 +1,6 @@
+name = "cache-fn-worker"
+main = "build/worker/shim.mjs"
+compatibility_date = "2025-04-24"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
