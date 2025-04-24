@@ -2,6 +2,8 @@ use axum::{routing::get, Router};
 use tower_service::Service;
 use worker::*;
 
+mod models;
+
 fn router() -> Router {
     Router::new().route("/", get(root))
 }
