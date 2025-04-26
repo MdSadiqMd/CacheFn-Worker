@@ -4,3 +4,11 @@ compatibility_date = "2025-04-24"
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"
+
+[vars.secrets]
+DATABASE_ID = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cache-fn"
+database_id = "${DATABASE_ID}"

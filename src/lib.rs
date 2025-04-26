@@ -4,6 +4,7 @@ use worker::*;
 
 mod models;
 mod utils;
+mod cache;
 
 fn router() -> Router {
     Router::new().route("/", get(root))

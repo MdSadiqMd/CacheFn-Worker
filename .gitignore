@@ -2,3 +2,4 @@
 .wrangler
 build
 node_modules
+.dev.vars
