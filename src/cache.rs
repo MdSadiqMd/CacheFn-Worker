@@ -45,8 +45,7 @@ impl CacheStorage {
 
         let stmt = self.db
             .prepare("SELECT value FROM cache_entries WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)")
-            .bind(&[key.into(), current_time().as_millis().into()])
-            .await?;
+            .bind(&[key.into(), current_time().as_millis().into()])?;
 
         let result: Option<String> = stmt.first(None).await?;
         match result {
@@ -61,32 +60,38 @@ impl CacheStorage {
         let expires_at = req.ttl.map(future_time);
         let tags = req.tags;
 
-        let tx = self.db.begin().await?;
-        tx.exec("DELETE FROM cache_entries WHERE key = ?", &[&key])
+        self.db
+            .prepare("DELETE FROM cache_entries WHERE key = ?")
+            .bind(&[key.clone().into()])?
+            .run()
             .await?;
+
         if let Some(exp) = expires_at {
-            tx.exec(
-                "INSERT INTO cache_entries (key, value, expires_at) VALUES (?, ?, ?)",
-                &[&key, &value, &exp.timestamp_millis().to_string()],
-            )
-            .await?;
+            self.db
+                .prepare("INSERT INTO cache_entries (key, value, expires_at) VALUES (?, ?, ?)")
+                .bind(&[
+                    key.clone().into(),
+                    value.into(),
+                    exp.timestamp_millis().to_string().into(),
+                ])?
+                .run()
+                .await?;
         } else {
-            tx.exec(
-                "INSERT INTO cache_entries (key, value, expires_at) VALUES (?, ?, NULL)",
-                &[&key, &value],
-            )
-            .await?;
+            self.db
+                .prepare("INSERT INTO cache_entries (key, value, expires_at) VALUES (?, ?, NULL)")
+                .bind(&[key.clone().into(), value.into()])?
+                .run()
+                .await?;
         }
 
         for tag in tags {
-            tx.exec(
-                "INSERT INTO cache_tags (tag, cache_key) VALUES (?, ?)",
-                &[&tag, &key],
-            )
-            .await?;
+            self.db
+                .prepare("INSERT INTO cache_tags (tag, cache_key) VALUES (?, ?)")
+                .bind(&[tag.into(), key.clone().into()])?
+                .run()
+                .await?;
         }
 
-        tx.commit().await?;
         Ok(())
     }
 
@@ -95,7 +100,6 @@ impl CacheStorage {
             return Ok(());
         }
 
-        let tx = self.db.begin().await?;
         let placeholders = (0..tags.len()).map(|_| "?").collect::<Vec<_>>().join(",");
 
         let query = format!(
@@ -104,19 +108,24 @@ impl CacheStorage {
             )",
             placeholders
         );
-        let params: Vec<_> = tags.iter().map(|t| t.as_str().into()).collect();
 
-        tx.exec(&query, &params).await?;
-        tx.commit().await?;
+        let mut stmt = self.db.prepare(&query);
+        for tag in &tags {
+            stmt = match stmt.bind(&[tag.clone().into()]) {
+                Ok(stmt) => stmt,
+                Err(err) => return Err(err),
+            }
+        }
+
+        stmt.run().await?;
         Ok(())
     }
 
     async fn clean_expired(&self) -> Result<()> {
         self.db
-            .exec(
-                "DELETE FROM cache_entries WHERE expires_at IS NOT NULL AND expires_at <= ?",
-                &[current_time().as_millis()],
-            )
+            .prepare("DELETE FROM cache_entries WHERE expires_at IS NOT NULL AND expires_at <= ?")
+            .bind(&[current_time().as_millis().into()])?
+            .run()
             .await?;
         Ok(())
     }
