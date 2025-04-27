@@ -57,6 +57,28 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
                 .await
                 .map(|_| success_response(None).unwrap())
         })
+        .post_async("/invalidate", |mut req, ctx| async move {
+            let api_key = ctx.var("API_KEY")?.to_string();
+            if !is_authorized(&req, &api_key) {
+                return error_response(401, "Unauthorized");
+            }
+
+            let tags: Vec<String> = req
+                .json()
+                .await
+                .map_err(|e| format!("Invalid request: {e}"))?;
+            let db = ctx.env.d1("DB")?;
+            let cache = CacheStorage::new(db);
+
+            cache
+                .setup()
+                .await
+                .map_err(|e| format!("DB setup failed: {e}"))?;
+            cache
+                .invalidate_tags(tags)
+                .await
+                .map(|_| success_response(None))?
+        })
         .run(req, env)
         .await
 }
