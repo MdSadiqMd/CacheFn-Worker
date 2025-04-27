@@ -1,4 +1,5 @@
 use cache::CacheStorage;
+use models::CacheRequest;
 use serde_json::json;
 use utils::{error_response, is_authorized, success_response};
 use worker::*;
@@ -72,7 +73,7 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
                 return error_response(401, "Unauthorized");
             }
 
-            let cache_req: Vec<String> = req
+            let cache_req: CacheRequest = req
                 .json()
                 .await
                 .map_err(|e| format!("Invalid request: {e}"))?;
@@ -84,9 +85,10 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
                 .await
                 .map_err(|e| format!("DB setup failed: {e}"))?;
             cache
-                .invalidate_tags(cache_req)
+                .set(cache_req)
                 .await
-                .map(|_| success_response(None).unwrap())
+                .map(|_| success_response(None))
+                .unwrap_or_else(|e| error_response(500, &format!("Cache error: {e}")))
         })
         .post_async("/invalidate", |mut req, ctx| async move {
             let api_key = ctx.var("API_KEY")?.to_string();
@@ -108,7 +110,8 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
             cache
                 .invalidate_tags(tags)
                 .await
-                .map(|_| success_response(None))?
+                .map(|_| success_response(None))
+                .unwrap_or_else(|e| error_response(500, &format!("Cache error: {e}")))
         })
         .run(req, env)
         .await
