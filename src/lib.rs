@@ -1,5 +1,4 @@
 use cache::CacheStorage;
-use models::CacheRequest;
 use utils::{error_response, is_authorized, success_response};
 use worker::*;
 
@@ -9,9 +8,12 @@ mod utils;
 
 #[event(fetch)]
 pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Response> {
+    console_error_panic_hook::set_once();
+
     Router::new()
-        .options("*", |_, _| {
-            Response::empty().map(|resp| resp.with_headers(utils::cors_header()))
+        .options_async("/*_path", |_, _| async {
+            let headers = utils::cors_header();
+            Response::empty().map(|r| r.with_headers(headers))
         })
         .get_async("/get/:key", |req, ctx| async move {
             let api_key = ctx.var("API_KEY")?.to_string();
@@ -19,21 +21,18 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
                 return error_response(401, "Unauthorized");
             }
 
-            let key = match ctx.param("key") {
-                Some(k) => k,
-                None => return error_response(400, "Missing key parameter"),
-            };
-
+            let key = ctx.param("key").ok_or("Missing key parameter")?;
             let db = ctx.env.d1("DB")?;
             let cache = CacheStorage::new(db);
-            if let Err(e) = cache.setup().await {
-                return error_response(500, &format!("Database setup error: {}", e));
-            }
 
+            cache
+                .setup()
+                .await
+                .map_err(|e| format!("DB setup failed: {e}"))?;
             match cache.get(key).await {
                 Ok(Some(value)) => success_response(Some(value)),
                 Ok(None) => success_response(None),
-                Err(e) => error_response(500, &format!("Cache error: {}", e)),
+                Err(e) => error_response(500, &format!("Cache error: {e}")),
             }
         })
         .post_async("/set", |mut req, ctx| async move {
@@ -42,21 +41,21 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
                 return error_response(401, "Unauthorized");
             }
 
-            let cache_req: CacheRequest = match req.json().await {
-                Ok(req) => req,
-                Err(e) => return error_response(400, &format!("Invalid request: {}", e)),
-            };
-
+            let cache_req: Vec<String> = req
+                .json()
+                .await
+                .map_err(|e| format!("Invalid request: {e}"))?;
             let db = ctx.env.d1("DB")?;
             let cache = CacheStorage::new(db);
-            if let Err(e) = cache.setup().await {
-                return error_response(500, &format!("Database setup error: {}", e));
-            }
 
-            match cache.set(cache_req).await {
-                Ok(_) => success_response(None),
-                Err(e) => error_response(500, &format!("Cache error: {}", e)),
-            }
+            cache
+                .setup()
+                .await
+                .map_err(|e| format!("DB setup failed: {e}"))?;
+            cache
+                .invalidate_tags(cache_req)
+                .await
+                .map(|_| success_response(None).unwrap())
         })
         .run(req, env)
         .await
