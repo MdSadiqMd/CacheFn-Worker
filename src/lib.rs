@@ -1,4 +1,5 @@
 use cache::CacheStorage;
+use models::CacheRequest;
 use utils::{error_response, is_authorized, success_response};
 use worker::*;
 
@@ -32,6 +33,28 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
             match cache.get(key).await {
                 Ok(Some(value)) => success_response(Some(value)),
                 Ok(None) => success_response(None),
+                Err(e) => error_response(500, &format!("Cache error: {}", e)),
+            }
+        })
+        .post_async("/set", |mut req, ctx| async move {
+            let api_key = ctx.var("API_KEY")?.to_string();
+            if !is_authorized(&req, &api_key) {
+                return error_response(401, "Unauthorized");
+            }
+
+            let cache_req: CacheRequest = match req.json().await {
+                Ok(req) => req,
+                Err(e) => return error_response(400, &format!("Invalid request: {}", e)),
+            };
+
+            let db = ctx.env.d1("DB")?;
+            let cache = CacheStorage::new(db);
+            if let Err(e) = cache.setup().await {
+                return error_response(500, &format!("Database setup error: {}", e));
+            }
+
+            match cache.set(cache_req).await {
+                Ok(_) => success_response(None),
                 Err(e) => error_response(500, &format!("Cache error: {}", e)),
             }
         })
